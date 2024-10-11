@@ -15,26 +15,41 @@ def load_file():
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}")
 
-def mask_coordinates(df):
-    df['Широта'] = df['Широта'].apply(lambda x: int(x))  # Приведение к целому числу
-    df['Долгота'] = df['Долгота'].apply(lambda x: int(x))  # Приведение к целому числу
+# Локальное обобщение
+def replace_coordinates_with_city(df):
+    coordinates_to_city = {
+    (59, 30): "Санкт-Петербург",
+    (55, 37): "Москва",
+    (48, 2): "Париж",
+    (40, -74): "Нью-Йорк"
+}
+    df['Широта'] = df['Широта'].apply(lambda x: int(x))
+    df['Долгота'] = df['Долгота'].apply(lambda x: int(x))
 
+    df['Местоположение'] = df.apply(lambda row: coordinates_to_city.get((row['Широта'], row['Долгота']), 'Неизвестное местоположение'), axis=1)
+    latitude_index = df.columns.get_loc('Широта')
+    df.drop(columns=['Широта', 'Долгота'], inplace=True)
+    df.insert(latitude_index, 'Местоположение', df.pop('Местоположение'))
+
+    return df
+
+# Возмущение
 def perturb_date(df):
     if pd.api.types.is_datetime64_any_dtype(df['Дата и время']):
         df['Дата и время'] = df['Дата и время'].dt.date
     else:
         df['Дата и время'] = pd.to_datetime(df['Дата и время'], errors='coerce').dt.date
 
-# Локальное подавление
+# Маскеризация
 def suppress_card_numbers(df):
-    df['Номер карты'] = ''
+    df['Номер карты'] = '*'*16
 
 # Агрегирование по количеству товаров в стобцах магазин, категория, бренд
 def aggregate_items(df):
     df['Количество товаров'] = df.groupby(['Магазин', 'Категория', 'Бренд'])['Количество товаров'].transform('sum')
 
     return df
-
+# Микро-агрегация по группам
 def apply_price_range_per_item(df):
     df['Стоимость за единицу'] = df['Стоимость'] / df['Количество товаров']
     df = df.drop(columns=['Стоимость']) # Удаление
@@ -50,13 +65,26 @@ def apply_price_range_per_item(df):
 
     return df
 
+# Локальное подавление по группам
+def fill_most_frequent_values(df):
+    def get_most_frequent(series):
+        return series.mode()[0]  # mode() возвращает самое частое значение
+
+    bank_mode = df.groupby(['Магазин', 'Категория', 'Бренд'])['Банк'].transform(get_most_frequent)
+    payment_system_mode = df.groupby(['Магазин', 'Категория', 'Бренд'])['Платежная система'].transform(get_most_frequent)
+
+    df['Банк'] = bank_mode
+    df['Платежная система'] = payment_system_mode
+
+    return df
+
 def anonymize_data():
     global df  
     if df is None:
         messagebox.showerror("Ошибка", "Сначала загрузите файл.")
         return
     
-    mask_coordinates(df)
+    df = replace_coordinates_with_city(df)
 
     perturb_date(df)
     
@@ -66,8 +94,10 @@ def anonymize_data():
 
     aggregate_items(df)
 
+    df = fill_most_frequent_values(df)
+
     # Вывод отладочной информации
-    print(df[['Магазин', 'Категория', 'Бренд', 'Количество товаров', 'Стоимость за единицу товара']])
+    print(df[['Местоположение','Дата и время','Номер карты','Банк','Платежная система','Количество товаров','Стоимость за единицу товара']])
 
     messagebox.showinfo("Успех", "Обезличивание данных завершено.")
     
@@ -91,7 +121,7 @@ def find_bad_k_values(k_anonymity_df, k_threshold=1):
     return bad_k_values
 
 def check_k_anonymity():
-    quasi_identifiers = ['Магазин', 'Широта', 'Долгота', 'Категория', 'Бренд']  
+    quasi_identifiers = ['Магазин','Местоположение','Дата и время','Категория', 'Бренд','Номер карты','Банк','Платежная система','Количество товаров','Стоимость за единицу товара']  
     k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers)
     
     bad_k_values = find_bad_k_values(k_anonymity_df)
