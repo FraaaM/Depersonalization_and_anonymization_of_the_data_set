@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import os
-
 
 def load_file():
     global df
@@ -27,30 +26,62 @@ def replace_coordinates_with_city(df):
     df['Долгота'] = df['Долгота'].apply(lambda x: int(x))
 
     df['Местоположение'] = df.apply(lambda row: coordinates_to_city.get((row['Широта'], row['Долгота']), 'Неизвестное местоположение'), axis=1)
-    latitude_index = df.columns.get_loc('Широта')
+    latitude_index = df.columns.get_loc('Широта')       
     df.drop(columns=['Широта', 'Долгота'], inplace=True)
     df.insert(latitude_index, 'Местоположение', df.pop('Местоположение'))
 
     return df
 
-# Возмущение
-def perturb_date(df):
-    if pd.api.types.is_datetime64_any_dtype(df['Дата и время']):
-        df['Дата и время'] = df['Дата и время'].dt.date
-    else:
-        df['Дата и время'] = pd.to_datetime(df['Дата и время'], errors='coerce').dt.date
+# Агрегирование даты по стобцам магазин, категория, бренд
+def aggregate_date_season(df):
+    if not pd.api.types.is_datetime64_any_dtype(df['Дата и время']):
+        df['Дата и время'] = pd.to_datetime(df['Дата и время'], errors='coerce')
+
+    df['Год'] = df['Дата и время'].dt.year
+    df['Месяц'] = df['Дата и время'].dt.month
+
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'Зима'
+        elif month in [3, 4, 5]:
+            return 'Весна'
+        elif month in [6, 7, 8]:
+            return 'Лето'
+        elif month in [9, 10, 11]:
+            return 'Осень'
+
+    df['Сезон'] = df['Месяц'].apply(get_season)
+    # Подсчитываем количество транзакций для каждого сезона 
+    def aggregate_seasons(group):
+        year = group['Год'].iloc[0]  
+        # Количество транзакций на каждый сезон 
+        season_counts = group['Сезон'].value_counts().to_dict()  
+        # Формируем строку вида 'Зима(2)', 'Осень(1)', если есть транзакции в этих сезонах
+        seasons_str = ', '.join([f"{season}({count})" for season, count in season_counts.items()])
+        return f"{year}, {seasons_str}"
+
+    date_column_index = df.columns.get_loc('Дата и время')
+
+    aggregated = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_seasons).reset_index()
+    aggregated.columns = ['Магазин', 'Категория', 'Бренд', 'Дата(число транзакций)']
+
+    df = df.merge(aggregated, on=['Магазин', 'Категория', 'Бренд'], how='left')
+    df.drop(columns=['Год', 'Месяц', 'Сезон', 'Дата и время'], inplace=True)
+    df.insert(date_column_index, 'Дата(число транзакций)', df.pop('Дата(число транзакций)'))
+
+    return df
 
 # Маскеризация
 def suppress_card_numbers(df):
     df['Номер карты'] = '*'*16
 
-# Агрегирование по количеству товаров в стобцах магазин, категория, бренд
+# Агрегирование количества товаров по стобцам магазин, категория, бренд
 def aggregate_items(df):
     df['Количество товаров'] = df.groupby(['Магазин', 'Категория', 'Бренд'])['Количество товаров'].transform('sum')
 
     return df
-# Микро-агрегация по группам
-def apply_price_range_per_item(df):
+# Микро-агрегация по стобцам магазин, категория, бренд
+def aggregate_price(df):
     df['Стоимость за единицу'] = df['Стоимость'] / df['Количество товаров']
     df = df.drop(columns=['Стоимость']) # Удаление
     unique_groups = df.groupby(['Магазин', 'Категория', 'Бренд']).agg(
@@ -65,16 +96,36 @@ def apply_price_range_per_item(df):
 
     return df
 
-# Локальное подавление по группам
-def fill_most_frequent_values(df):
-    def get_most_frequent(series):
-        return series.mode()[0]  # mode() возвращает самое частое значение
+# Аргегация банков и п.с. по столбцам Магазин, Категория, Бренд
+def aggregate_bank_and_payment_system(df):
 
-    bank_mode = df.groupby(['Магазин', 'Категория', 'Бренд'])['Банк'].transform(get_most_frequent)
-    payment_system_mode = df.groupby(['Магазин', 'Категория', 'Бренд'])['Платежная система'].transform(get_most_frequent)
+    def aggregate_banks(group):
+        # Подсчитываем количество каждого банка в группе
+        bank_counts = group['Банк'].value_counts().to_dict()  
+        # Создаем строку вида 'Банк(число транзакций)'
+        banks_str = ', '.join([f"{bank}({count})" for bank, count in bank_counts.items() if count > 0])  
+        return banks_str
 
-    df['Банк'] = bank_mode
-    df['Платежная система'] = payment_system_mode
+    def aggregate_payment_systems(group):
+        payment_counts = group['Платежная система'].value_counts().to_dict()  
+        payment_systems_str = ', '.join([f"{payment}({count})" for payment, count in payment_counts.items() if count > 0]) 
+        return payment_systems_str
+
+    aggregated_banks = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_banks).reset_index()
+    aggregated_banks.columns = ['Магазин', 'Категория', 'Бренд', 'Банки(число транзакций)']
+    
+    aggregated_payments = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_payment_systems).reset_index()
+    aggregated_payments.columns = ['Магазин', 'Категория', 'Бренд', 'Платежные системы(число транзакций)']
+    
+    df = df.merge(aggregated_banks, on=['Магазин', 'Категория', 'Бренд'], how='left')
+    df = df.merge(aggregated_payments, on=['Магазин', 'Категория', 'Бренд'], how='left')
+
+    bank_index = df.columns.get_loc('Банк')
+    payment_system_index = df.columns.get_loc('Платежная система')
+    df.drop(columns=['Банк', 'Платежная система'], inplace=True)
+
+    df.insert(bank_index, 'Банки(число транзакций)', df.pop('Банки(число транзакций)'))
+    df.insert(payment_system_index, 'Платежные системы(число транзакций)', df.pop('Платежные системы(число транзакций)'))
 
     return df
 
@@ -86,18 +137,18 @@ def anonymize_data():
     
     df = replace_coordinates_with_city(df)
 
-    perturb_date(df)
+    df = aggregate_date_season(df)
     
     suppress_card_numbers(df)
     
-    df = apply_price_range_per_item(df)
+    df = aggregate_price(df)
 
     aggregate_items(df)
 
-    df = fill_most_frequent_values(df)
+    df = aggregate_bank_and_payment_system(df)
 
     # Вывод отладочной информации
-    print(df[['Местоположение','Дата и время','Номер карты','Банк','Платежная система','Количество товаров','Стоимость за единицу товара']])
+    print(df[['Местоположение','Дата(число транзакций)','Номер карты','Банки(число транзакций)','Платежные системы(число транзакций)','Количество товаров','Стоимость за единицу товара']])
 
     messagebox.showinfo("Успех", "Обезличивание данных завершено.")
     
@@ -114,23 +165,26 @@ def calculate_k_anonymity(df, quasi_identifiers):
     min_k = grouped['count'].min()
     return grouped, min_k
 
-def find_bad_k_values(k_anonymity_df, k_threshold=1):
-    bad_k_values = k_anonymity_df[k_anonymity_df['count'] <= k_threshold]
-    if len(bad_k_values) > 5:
-        return bad_k_values.head(5)
-    return bad_k_values
+def find_bad_k_values(k_anonymity_df):
+    # Сортировка по возрастанию
+    sorted_k_values = k_anonymity_df.drop_duplicates(subset='count').sort_values('count')
+    bad_k_values = sorted_k_values.head(5)
+    total_rows = k_anonymity_df['count'].sum()
+    bad_k_values['percent'] = (bad_k_values['count'] / total_rows * 100).round(2)
+    
+    return bad_k_values[['count', 'percent']]
 
 def check_k_anonymity():
-    quasi_identifiers = ['Магазин','Местоположение','Дата и время','Категория', 'Бренд','Номер карты','Банк','Платежная система','Количество товаров','Стоимость за единицу товара']  
+    quasi_identifiers = ['Магазин','Местоположение','Дата(число транзакций)','Категория', 'Бренд','Номер карты','Банки(число транзакций)','Платежные системы(число транзакций)','Количество товаров','Стоимость за единицу товара']  
     k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers)
     
     bad_k_values = find_bad_k_values(k_anonymity_df)
+    messagebox.showinfo("K-Анонимность", f"Использующиеся столбцы {quasi_identifiers}")
     messagebox.showinfo("K-Анонимность", f"Минимальное значение K: {min_k}\n\nПлохие значения K:\n{bad_k_values}")
 
     if min_k == 1:
         unique_rows = k_anonymity_df[k_anonymity_df['count'] == 1]
         messagebox.showinfo("Уникальные строки", f"Количество уникальных строк: {len(unique_rows)}")
-
 
 root = tk.Tk()
 root.title("Обезличивание данных и K-Анонимность")
