@@ -96,63 +96,42 @@ def aggregate_price(df):
 
     return df
 
-# Аргегация банков и п.с. по столбцам Магазин, Категория, Бренд
-def aggregate_bank_and_payment_system(df):
-
-    def aggregate_banks(group):
-        # Подсчитываем количество каждого банка в группе
-        bank_counts = group['Банк'].value_counts().to_dict()  
-        # Создаем строку вида 'Банк(число транзакций)'
-        banks_str = ', '.join([f"{bank}({count})" for bank, count in bank_counts.items() if count > 0])  
+# Агрегация банков по столбцам Магазин, Категория, Бренд
+def aggregate_banks(df):
+    def aggregate_banks_in_group(group):
+        bank_counts = group['Банк'].value_counts().to_dict()
+        banks_str = ', '.join([f"{bank}({count})" for bank, count in bank_counts.items() if count > 0])
         return banks_str
-
-    def aggregate_payment_systems(group):
-        payment_counts = group['Платежная система'].value_counts().to_dict()  
-        payment_systems_str = ', '.join([f"{payment}({count})" for payment, count in payment_counts.items() if count > 0]) 
-        return payment_systems_str
-
-    aggregated_banks = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_banks).reset_index()
+    
+    aggregated_banks = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_banks_in_group).reset_index()
     aggregated_banks.columns = ['Магазин', 'Категория', 'Бренд', 'Банки(число транзакций)']
-    
-    aggregated_payments = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_payment_systems).reset_index()
-    aggregated_payments.columns = ['Магазин', 'Категория', 'Бренд', 'Платежные системы(число транзакций)']
-    
+
     df = df.merge(aggregated_banks, on=['Магазин', 'Категория', 'Бренд'], how='left')
+    
+    bank_index = df.columns.get_loc('Банк')
+    df.drop(columns=['Банк'], inplace=True)
+    df.insert(bank_index, 'Банки(число транзакций)', df.pop('Банки(число транзакций)'))
+    
+    return df
+
+# Агрегация платёжных систем по столбцам Магазин, Категория, Бренд
+def aggregate_payment_systems(df):
+    def aggregate_payments_in_group(group):
+        payment_counts = group['Платежная система'].value_counts().to_dict()
+        payment_systems_str = ', '.join([f"{payment}({count})" for payment, count in payment_counts.items() if count > 0])
+        return payment_systems_str
+    
+    aggregated_payments = df.groupby(['Магазин', 'Категория', 'Бренд']).apply(aggregate_payments_in_group).reset_index()
+    aggregated_payments.columns = ['Магазин', 'Категория', 'Бренд', 'Платежные системы(число транзакций)']
+
     df = df.merge(aggregated_payments, on=['Магазин', 'Категория', 'Бренд'], how='left')
 
-    bank_index = df.columns.get_loc('Банк')
     payment_system_index = df.columns.get_loc('Платежная система')
-    df.drop(columns=['Банк', 'Платежная система'], inplace=True)
-
-    df.insert(bank_index, 'Банки(число транзакций)', df.pop('Банки(число транзакций)'))
+    df.drop(columns=['Платежная система'], inplace=True)
     df.insert(payment_system_index, 'Платежные системы(число транзакций)', df.pop('Платежные системы(число транзакций)'))
 
     return df
 
-def anonymize_data():
-    global df  
-    if df is None:
-        messagebox.showerror("Ошибка", "Сначала загрузите файл.")
-        return
-    
-    df = replace_coordinates_with_city(df)
-
-    df = aggregate_date_season(df)
-    
-    suppress_card_numbers(df)
-    
-    df = aggregate_price(df)
-
-    aggregate_items(df)
-
-    df = aggregate_bank_and_payment_system(df)
-
-    # Вывод отладочной информации
-    print(df[['Местоположение','Дата(число транзакций)','Номер карты','Банки(число транзакций)','Платежные системы(число транзакций)','Количество товаров','Стоимость за единицу товара']])
-
-    messagebox.showinfo("Успех", "Обезличивание данных завершено.")
-    
-    save_anonymized_data()
 
 def save_anonymized_data():
     save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
@@ -160,8 +139,74 @@ def save_anonymized_data():
         df.to_excel(save_path, index=False)
         messagebox.showinfo("Успех", f"Файл сохранен: {os.path.basename(save_path)}")
 
-def calculate_k_anonymity(df, quasi_identifiers):
-    grouped = df.groupby(quasi_identifiers).size().reset_index(name='count')
+def anonymize_data(selected_identifiers):
+    global df
+    if df is None:
+        messagebox.showerror("Ошибка", "Сначала загрузите файл.")
+        return
+    
+    if "Местоположение" in selected_identifiers:
+        df = replace_coordinates_with_city(df)
+
+    if "Дата и время" in selected_identifiers:
+        df = aggregate_date_season(df)
+
+    if "Номер карты" in selected_identifiers:
+        suppress_card_numbers(df)
+
+    if "Стоимость" in selected_identifiers:
+        df = aggregate_price(df)
+
+    if "Количество товаров" in selected_identifiers:
+        aggregate_items(df)
+
+    if "Банк" in selected_identifiers:
+        df = aggregate_banks(df)
+
+    if "Платежная система" in selected_identifiers:
+        df = aggregate_payment_systems(df)
+
+    # Отладочная информация
+    print(df[['Местоположение', 'Дата(число транзакций)', 'Номер карты', 
+              'Банки(число транзакций)', 'Платежные системы(число транзакций)', 
+              'Количество товаров', 'Стоимость за единицу товара']])
+
+    messagebox.showinfo("Успех", "Обезличивание данных завершено.")
+    save_anonymized_data()
+
+def choose_quasi_identifiers():
+    quasi_identifiers_window = tk.Toplevel(root)
+    quasi_identifiers_window.geometry("370x300")
+    quasi_identifiers_window.title("Выберите квази-идентификаторы для обезличивания")
+
+    quasi_identifiers = [
+        "Магазин", "Местоположение", "Дата и время", 
+        "Категория", "Бренд", "Номер карты", 
+        "Банк", "Платежная система", "Количество товаров", "Стоимость"
+    ]
+
+    selected_identifiers = {}
+    
+    for identifier in quasi_identifiers:
+        var = tk.BooleanVar()
+        chk = tk.Checkbutton(quasi_identifiers_window, text=identifier, variable=var)
+        chk.pack(anchor='w')
+        selected_identifiers[identifier] = var
+    
+    def on_confirm():
+        chosen_identifiers = [key for key, var in selected_identifiers.items() if var.get()]
+        if chosen_identifiers:
+            quasi_identifiers_window.destroy() 
+            anonymize_data(chosen_identifiers) 
+        else:
+            messagebox.showwarning("Предупреждение", "Выберите хотя бы один квази-идентификатор.")
+
+    confirm_button = tk.Button(quasi_identifiers_window, text="Подтвердить", command=on_confirm)
+    confirm_button.pack(pady=10)
+    
+
+def calculate_k_anonymity(df, quasi_identifiers_k):
+    grouped = df.groupby(quasi_identifiers_k).size().reset_index(name='count')
     min_k = grouped['count'].min()
     return grouped, min_k
 
@@ -175,27 +220,30 @@ def find_bad_k_values(k_anonymity_df):
     return bad_k_values[['count', 'percent']]
 
 def check_k_anonymity():
-    quasi_identifiers = ['Магазин','Местоположение','Дата(число транзакций)','Категория', 'Бренд','Номер карты','Банки(число транзакций)','Платежные системы(число транзакций)','Количество товаров','Стоимость за единицу товара']  
-    k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers)
+    quasi_identifiers_k = list(df.columns)
+    k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers_k)
     
     bad_k_values = find_bad_k_values(k_anonymity_df)
-    messagebox.showinfo("K-Анонимность", f"Использующиеся столбцы {quasi_identifiers}")
     messagebox.showinfo("K-Анонимность", f"Минимальное значение K: {min_k}\n\nПлохие значения K:\n{bad_k_values}")
 
     if min_k == 1:
         unique_rows = k_anonymity_df[k_anonymity_df['count'] == 1]
         messagebox.showinfo("Уникальные строки", f"Количество уникальных строк: {len(unique_rows)}")
 
+
 root = tk.Tk()
 root.title("Обезличивание данных и K-Анонимность")
+root.geometry("500x250")
 
+file_label = tk.Label(root, text="Загрузите файл для обезличивания")
+file_label.pack(pady=5)
 load_button = tk.Button(root, text="Загрузить файл", command=load_file)
 load_button.pack(pady=10)
 
 file_label = tk.Label(root, text="Файл не загружен")
 file_label.pack(pady=5)
 
-anonymize_button = tk.Button(root, text="Обезличить данные", command=anonymize_data)
+anonymize_button = tk.Button(root, text="Обезличить данные", command=choose_quasi_identifiers)
 anonymize_button.pack(pady=10)
 
 k_anonymity_button = tk.Button(root, text="Проверить K-Анонимность", command=check_k_anonymity)
