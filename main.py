@@ -4,15 +4,18 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 import os
 
+df = None
+
 def load_file():
     global df
     file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
     if file_path:
         try:
             df = pd.read_excel(file_path)
-            file_label.config(text=f"Файл загружен: {os.path.basename(file_path)}")
+            file_label.config(text=f"Файл загружен: {os.path.basename(file_path)}", fg="black", font=("Arial", 12))
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}")
+
 
 # Локальное обобщение
 def replace_coordinates_with_city(df):
@@ -166,18 +169,23 @@ def anonymize_data(selected_identifiers):
     if "Платежная система" in selected_identifiers:
         df = aggregate_payment_systems(df)
 
-    # Отладочная информация
-    print(df[['Местоположение', 'Дата(число транзакций)', 'Номер карты', 
-              'Банки(число транзакций)', 'Платежные системы(число транзакций)', 
-              'Количество товаров', 'Стоимость за единицу товара']])
+    #Отладочная информация
+    # print(df[['Местоположение', 'Дата(число транзакций)', 'Номер карты', 
+    #           'Банки(число транзакций)', 'Платежные системы(число транзакций)', 
+    #           'Количество товаров', 'Стоимость за единицу товара']])
 
     messagebox.showinfo("Успех", "Обезличивание данных завершено.")
     save_anonymized_data()
 
 def choose_quasi_identifiers():
+    global df
+    if df is None:
+        messagebox.showerror("Ошибка", "Сначала загрузите файл.")
+        return
+    
     quasi_identifiers_window = tk.Toplevel(root)
-    quasi_identifiers_window.geometry("370x300")
-    quasi_identifiers_window.title("Выберите квази-идентификаторы для обезличивания")
+    quasi_identifiers_window.geometry("400x300")
+    quasi_identifiers_window.title("Выберите данные для обезличивания (квази-идентификаторы)")
 
     quasi_identifiers = [
         "Магазин", "Местоположение", "Дата и время", 
@@ -220,6 +228,11 @@ def find_bad_k_values(k_anonymity_df):
     return bad_k_values[['count', 'percent']]
 
 def check_k_anonymity():
+    global df
+    if df is None:
+        messagebox.showerror("Ошибка", "Сначала загрузите файл.")
+        return
+    
     quasi_identifiers_k = list(df.columns)
     k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers_k)
     
@@ -230,6 +243,9 @@ def check_k_anonymity():
         unique_rows = k_anonymity_df[k_anonymity_df['count'] == 1]
         messagebox.showinfo("Уникальные строки", f"Количество уникальных строк: {len(unique_rows)}")
 
+def quit_program():
+    if messagebox.askokcancel("Выход", "Вы действительно хотите завершить программу?"):
+        root.destroy()
 
 root = tk.Tk()
 root.title("Обезличивание данных и K-Анонимность")
@@ -248,5 +264,8 @@ anonymize_button.pack(pady=10)
 
 k_anonymity_button = tk.Button(root, text="Проверить K-Анонимность", command=check_k_anonymity)
 k_anonymity_button.pack(pady=10)
+
+quit_button = tk.Button(root, text="ВЫЙТИ", command=quit_program, bg="red", fg="white", font=("Arial", 12))
+quit_button.pack(pady=10)
 
 root.mainloop()
