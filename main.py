@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 import os
@@ -8,7 +7,7 @@ df = None
 
 def load_file():
     global df
-    file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+    file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xlsm *.xls"), ("CSV files", "*.csv")])
     if file_path:
         try:
             df = pd.read_excel(file_path)
@@ -136,13 +135,13 @@ def aggregate_payment_systems(df):
     return df
 
 
-def save_anonymized_data():
+def save_depersonalized_data():
     save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
     if save_path:
         df.to_excel(save_path, index=False)
         messagebox.showinfo("Успех", f"Файл сохранен: {os.path.basename(save_path)}")
 
-def anonymize_data(selected_identifiers):
+def depersonalize_data(selected_identifiers):
     global df
     if df is None:
         messagebox.showerror("Ошибка", "Сначала загрузите файл.")
@@ -175,7 +174,7 @@ def anonymize_data(selected_identifiers):
     #           'Количество товаров', 'Стоимость за единицу товара']])
 
     messagebox.showinfo("Успех", "Обезличивание данных завершено.")
-    save_anonymized_data()
+    save_depersonalized_data()
 
 def choose_quasi_identifiers():
     global df
@@ -205,7 +204,7 @@ def choose_quasi_identifiers():
         chosen_identifiers = [key for key, var in selected_identifiers.items() if var.get()]
         if chosen_identifiers:
             quasi_identifiers_window.destroy() 
-            anonymize_data(chosen_identifiers) 
+            depersonalize_data(chosen_identifiers) 
         else:
             messagebox.showwarning("Предупреждение", "Выберите хотя бы один квази-идентификатор.")
 
@@ -223,10 +222,10 @@ def find_bad_k_values(k_anonymity_df):
     sorted_k_values = k_anonymity_df.drop_duplicates(subset='count').sort_values('count')
     bad_k_values = sorted_k_values.head(5)
     total_rows = k_anonymity_df['count'].sum()
-    bad_k_values['percent'] = (bad_k_values['count'] / total_rows * 100).round(2)
+    bad_k_values['percent'] = (bad_k_values['count'] / total_rows * 100).round(3)
     
-    return bad_k_values[['count', 'percent']]
-
+    return bad_k_values[['count', 'percent']].reset_index(drop=True)
+   
 def check_k_anonymity():
     global df
     if df is None:
@@ -235,13 +234,14 @@ def check_k_anonymity():
     
     quasi_identifiers_k = list(df.columns)
     k_anonymity_df, min_k = calculate_k_anonymity(df, quasi_identifiers_k)
-    
-    bad_k_values = find_bad_k_values(k_anonymity_df)
-    messagebox.showinfo("K-Анонимность", f"Минимальное значение K: {min_k}\n\nПлохие значения K:\n{bad_k_values}")
 
     if min_k == 1:
         unique_rows = k_anonymity_df[k_anonymity_df['count'] == 1]
         messagebox.showinfo("Уникальные строки", f"Количество уникальных строк: {len(unique_rows)}")
+    
+    bad_k_values = find_bad_k_values(k_anonymity_df)
+    messagebox.showinfo("K-Анонимность", f"Минимальное значение K: {min_k}\n\nПлохие значения K:\n{bad_k_values}")
+
 
 def quit_program():
     if messagebox.askokcancel("Выход", "Вы действительно хотите завершить программу?"):
@@ -259,8 +259,8 @@ load_button.pack(pady=10)
 file_label = tk.Label(root, text="Файл не загружен")
 file_label.pack(pady=5)
 
-anonymize_button = tk.Button(root, text="Обезличить данные", command=choose_quasi_identifiers)
-anonymize_button.pack(pady=10)
+depersonalize_button = tk.Button(root, text="Обезличить данные", command=choose_quasi_identifiers)
+depersonalize_button.pack(pady=10)
 
 k_anonymity_button = tk.Button(root, text="Проверить K-Анонимность", command=check_k_anonymity)
 k_anonymity_button.pack(pady=10)
